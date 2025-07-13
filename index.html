@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Log Aggregator</title>
+    <!-- Tailwind CSS CDN for easy styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the Inter font */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Style for the search results */
+        .log-entry {
+            background-color: #f9fafb; /* Light gray background */
+            border-left: 4px solid #3b82f6; /* Blue left border */
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-radius: 0.5rem; /* Rounded corners */
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Subtle shadow */
+            overflow-wrap: break-word; /* Ensure long lines wrap */
+        }
+        .log-entry strong {
+            color: #1d4ed8; /* Darker blue for log file name */
+        }
+        .highlight {
+            background-color: #fde68a; /* Yellow highlight for search term */
+            padding: 0 0.2rem;
+            border-radius: 0.2rem;
+        }
+        /* Basic responsive adjustments */
+        @media (max-width: 640px) {
+            .container {
+                padding: 1rem;
+            }
+            .search-input {
+                width: 100%;
+            }
+            .search-button {
+                width: 100%;
+                margin-top: 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen py-8">
+    <div class="container bg-white p-8 rounded-lg shadow-xl w-full max-w-3xl">
+        <h1 class="text-4xl font-extrabold text-center text-gray-900 mb-6">
+            <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
+                Simple Log Aggregator
+            </span>
+        </h1>
+        <p class="text-center text-gray-600 mb-8">
+            Search through your GitHub-hosted logs.
+        </p>
+
+        <div class="flex flex-col sm:flex-row gap-4 mb-8">
+            <input
+                type="text"
+                id="searchInput"
+                placeholder="Enter search query (e.g., ERROR, user_id)"
+                class="search-input flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm"
+            >
+            <button
+                id="searchButton"
+                class="search-button bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+                Search Logs
+            </button>
+        </div>
+
+        <div id="loadingIndicator" class="text-center text-blue-600 font-medium hidden mb-4">
+            Loading logs... Please wait.
+        </div>
+
+        <div id="results" class="space-y-4">
+            <!-- Search results will be displayed here -->
+            <p class="text-center text-gray-500" id="initialMessage">
+                Type a query and click 'Search Logs' to begin.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Define the GitHub repository details
+        // =================================================================================================
+        // IMPORTANT: These values have been updated based on the GitHub link you provided.
+        // Ensure they match your actual GitHub username and repository name exactly.
+        // =================================================================================================
+        const GITHUB_USERNAME = 'WheelFate'; // Your GitHub username
+        const REPOSITORY_NAME = 'simple-log-aggregator'; // Your repository name
+
+        // Define the paths to your log files within the repository.
+        // =================================================================================================
+        // This array has been updated with the log file path you provided.
+        // If you add more log files, make sure to add their exact, case-sensitive paths here.
+        // =================================================================================================
+        const LOG_FILE_PATHS = [
+            `logs/web-server/2025-07-13.log`, // Log file path from your GitHub link
+            // Add more log file paths here as you create them:
+            // `logs/app-server/2025-07-12.log`,
+            // `logs/database/errors.log`,
+        ];
+
+        // Store fetched log content
+        let allLogsContent = {}; // { 'file_path': 'content_string', ... }
+
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const resultsDiv = document.getElementById('results');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const initialMessage = document.getElementById('initialMessage');
+
+        // Function to fetch a single log file
+        async function fetchLogFile(filePath) {
+            // Constructs the URL to fetch the raw content of the file from GitHub
+            const rawUrl = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPOSITORY_NAME}/main/${filePath}`;
+            console.log(`Attempting to fetch: ${rawUrl}`); // Log the URL being fetched for debugging
+            try {
+                const response = await fetch(rawUrl);
+                if (!response.ok) {
+                    console.error(`Failed to fetch ${filePath}: ${response.status} ${response.statusText}`);
+                    return null;
+                }
+                const content = await response.text();
+                console.log(`Successfully fetched ${filePath}. Content length: ${content.length}`);
+                return content;
+            } catch (error) {
+                console.error(`Error fetching ${filePath}:`, error);
+                return null;
+            }
+        }
+
+        // Function to load all log files
+        async function loadAllLogs() {
+            loadingIndicator.classList.remove('hidden');
+            initialMessage.classList.add('hidden');
+            resultsDiv.innerHTML = ''; // Clear any previous messages
+            
+            const fetchPromises = LOG_FILE_PATHS.map(async (filePath) => {
+                const content = await fetchLogFile(filePath);
+                if (content) {
+                    allLogsContent[filePath] = content;
+                }
+            });
+            await Promise.all(fetchPromises);
+            loadingIndicator.classList.add('hidden');
+
+            console.log('Finished loading logs. allLogsContent:', allLogsContent); // Log the loaded content for verification
+
+            if (Object.keys(allLogsContent).length === 0) {
+                resultsDiv.innerHTML = '<p class="text-center text-red-500 font-bold">Failed to load any log files. Please check the following:</p>' +
+                                       '<ul class="list-disc list-inside text-left mx-auto max-w-md text-red-500">' +
+                                       '<li><strong>Your GitHub Username and Repository Name:</strong> Ensure `GITHUB_USERNAME` and `REPOSITORY_NAME` in the `index.html` script are exactly correct and case-sensitive.</li>' +
+                                       '<li><strong>Log File Paths:</strong> Verify that each path in the `LOG_FILE_PATHS` array is an exact, case-sensitive match to your files in the GitHub repository.</li>' +
+                                       '<li><strong>File Existence:</strong> Confirm that the log files actually exist in your GitHub repository\'s `main` branch.</li>' +
+                                       '<li><strong>Browser Console:</strong> Open your browser\'s developer console (usually F12) for specific error messages (e.g., 404 Not Found, CORS issues).</li>' +
+                                       '</ul>';
+            } else {
+                initialMessage.classList.remove('hidden'); // Show initial message if logs loaded successfully
+            }
+        }
+
+        // Function to perform the search
+        function performSearch() {
+            const query = searchInput.value.trim();
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (query === '') {
+                resultsDiv.innerHTML = '<p class="text-center text-gray-500">Please enter a search query.</p>';
+                return;
+            }
+
+            let foundResults = false;
+            const lowerCaseQuery = query.toLowerCase();
+
+            for (const filePath in allLogsContent) {
+                const content = allLogsContent[filePath];
+                const lines = content.split('\n');
+                let fileResultsHtml = '';
+                let fileHasMatches = false;
+
+                lines.forEach(line => {
+                    if (line.toLowerCase().includes(lowerCaseQuery)) {
+                        // Highlight the search term
+                        const highlightedLine = line.replace(
+                            new RegExp(`(${query})`, 'gi'),
+                            '<span class="highlight">$1</span>'
+                        );
+                        fileResultsHtml += `<p>${highlightedLine}</p>`;
+                        fileHasMatches = true;
+                        foundResults = true;
+                    }
+                });
+
+                if (fileHasMatches) {
+                    const logFileName = filePath.split('/').pop(); // Get just the file name
+                    resultsDiv.innerHTML += `
+                        <div class="log-entry">
+                            <strong>${logFileName}</strong> (${filePath})
+                            ${fileResultsHtml}
+                        </div>
+                    `;
+                }
+            }
+
+            if (!foundResults) {
+                resultsDiv.innerHTML = `<p class="text-center text-gray-500">No results found for "${query}".</p>`;
+            }
+        }
+
+        // Event Listeners
+        searchButton.addEventListener('click', performSearch);
+        searchInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        // Load logs when the page loads
+        window.onload = loadAllLogs;
+    </script>
+</body>
+</html>
