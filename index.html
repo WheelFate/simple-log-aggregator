@@ -3,14 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Log Aggregator</title>
+    <title>Advanced Log Aggregator</title>
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📜</text></svg>">
     <!-- Tailwind CSS CDN for easy styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip CDN for creating ZIP files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js"></script>
     <style>
         /* Custom styles for the Inter font */
         body {
             font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        body.dark ::-webkit-scrollbar-track {
+            background: #2d3748;
+        }
+        body.dark ::-webkit-scrollbar-thumb {
+            background: #6b7280;
+        }
+        body.dark ::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+
         /* Style for the search results */
         .log-entry {
             background-color: #f9fafb; /* Light gray background */
@@ -19,7 +51,14 @@
             margin-bottom: 0.75rem;
             border-radius: 0.5rem; /* Rounded corners */
             box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Subtle shadow */
-            overflow-wrap: break-word; /* Ensure long lines wrap */
+            overflow-wrap: break-word; /* Ensure long lines wrap by default */
+            position: relative; /* For line numbers */
+            transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .log-entry.no-wrap {
+            overflow-wrap: normal;
+            white-space: pre; /* Preserve whitespace and prevent wrapping */
+            overflow-x: auto; /* Allow horizontal scrolling for long lines */
         }
         .log-entry strong {
             color: #1d4ed8; /* Darker blue for log file name */
@@ -29,18 +68,304 @@
             padding: 0 0.2rem;
             border-radius: 0.2rem;
         }
+        .line-number {
+            color: #9ca3af; /* Gray color for line numbers */
+            font-size: 0.75rem; /* Smaller font size */
+            margin-right: 0.5rem;
+            user-select: none; /* Prevent selection */
+            flex-shrink: 0; /* Prevent line number from shrinking */
+        }
+        .copy-button {
+            background-color: #e0e7ff; /* Light blue */
+            color: #3b82f6; /* Blue text */
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            flex-shrink: 0; /* Prevent button from shrinking */
+        }
+        .copy-button:hover {
+            background-color: #c7d2fe; /* Lighter blue on hover */
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1000; /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if needed */
+            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+            animation: slideIn 0.3s ease-out;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+        }
+
+        /* Custom Message Box (Toast) */
+        .toast-message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            text-align: center;
+            font-weight: 500;
+            opacity: 0;
+            animation: fadeInOut 3s forwards;
+        }
+        .toast-message.success {
+            background-color: #d1fae5; /* green-100 */
+            color: #065f46; /* green-800 */
+        }
+        .toast-message.error {
+            background-color: #fee2e2; /* red-100 */
+            color: #991b1b; /* red-800 */
+        }
+        .toast-message.info {
+            background-color: #e0f2fe; /* blue-100 */
+            color: #1e40af; /* blue-800 */
+        }
+        .toast-message.warning {
+            background-color: #fffbeb; /* yellow-100 */
+            color: #92400e; /* yellow-800 */
+        }
+
+        /* Confirmation Modal */
+        .confirm-modal-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            text-align: center;
+            background-color: #fff;
+            border: 1px solid #d1d5db;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .confirm-modal-box button {
+            margin: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
+        .confirm-modal-box button.confirm-yes {
+            background-color: #ef4444; /* red-500 */
+            color: white;
+        }
+        .confirm-modal-box button.confirm-yes:hover {
+            background-color: #dc2626; /* red-600 */
+        }
+        .confirm-modal-box button.confirm-no {
+            background-color: #6b7280; /* gray-500 */
+            color: white;
+        }
+        .confirm-modal-box button.confirm-no:hover {
+            background-color: #4b5563; /* gray-600 */
+        }
+
+
+        /* Dark mode styles */
+        body.dark {
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+        }
+        body.dark .container {
+            background-color: #2d3748; /* Darker container */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        body.dark h1, body.dark p, body.dark label, body.dark h3, body.dark .text-gray-700, body.dark .text-gray-600, body.dark .text-gray-800 {
+            color: #e2e8f0;
+        }
+        body.dark .search-input, body.dark .filter-input, body.dark select, body.dark .file-select-checkbox, body.dark textarea {
+            background-color: #4a5568;
+            border-color: #4a5568;
+            color: #e2e8f0;
+        }
+        body.dark .search-input::placeholder, body.dark .filter-input::placeholder, body.dark textarea::placeholder {
+            color: #a0aec0;
+        }
+        body.dark .log-entry {
+            background-color: #28303d;
+            border-left-color: #63b3ed;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        body.dark .log-entry strong {
+            color: #90cdf4;
+        }
+        body.dark .highlight {
+            background-color: #ecc94b;
+            color: #2d3748;
+        }
+        body.dark .line-number {
+            color: #a0aec0;
+        }
+        body.dark .copy-button {
+            background-color: #4299e1;
+            color: #e2e8f0;
+        }
+        body.dark .copy-button:hover {
+            background-color: #3182ce;
+        }
+        body.dark .modal-content {
+            background-color: #2d3748;
+            color: #e2e8f0;
+        }
+        body.dark .close-button {
+            color: #e2e8f0;
+        }
+        body.dark .file-selection-container {
+            background-color: #2d3748;
+            border-color: #4a5568;
+        }
+        body.dark .toast-message.success {
+            background-color: #10b981; /* green-500 */
+            color: #fff;
+        }
+        body.dark .toast-message.error {
+            background-color: #ef4444; /* red-500 */
+            color: #fff;
+        }
+        body.dark .toast-message.info {
+            background-color: #3b82f6; /* blue-500 */
+            color: #fff;
+        }
+        body.dark .toast-message.warning {
+            background-color: #f59e0b; /* yellow-500 */
+            color: #fff;
+        }
+        body.dark .confirm-modal-box {
+            background-color: #2d3748;
+            color: #e2e8f0;
+            border-color: #4a5568;
+        }
+
+
+        /* Scroll to top/bottom buttons */
+        .scroll-button {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            background-color: #4299e1;
+            color: white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            transition: background-color 0.3s ease, transform 0.3s ease;
+            z-index: 999;
+        }
+        .scroll-button:hover {
+            background-color: #3182ce;
+            transform: scale(1.1);
+        }
+        #scrollToTopBtn {
+            bottom: 80px; /* Position above scroll to bottom */
+        }
         /* Basic responsive adjustments */
         @media (max-width: 640px) {
             .container {
                 padding: 1rem;
             }
-            .search-input {
+            .auth-input, .search-input, .filter-input, textarea {
                 width: 100%;
             }
-            .search-button {
+            .auth-button, .search-button, .filter-button {
                 width: 100%;
                 margin-top: 0.5rem;
             }
+            .flex-col-mobile {
+                flex-direction: column;
+            }
+            .scroll-button {
+                width: 40px;
+                height: 40px;
+                font-size: 1.2rem;
+                right: 10px;
+                bottom: 10px;
+            }
+            #scrollToTopBtn {
+                bottom: 60px;
+            }
+            .modal-content {
+                width: 95%;
+                padding: 15px;
+            }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        body.dark .spinner {
+            border-color: rgba(255, 255, 255, 0.2);
+            border-left-color: #63b3ed;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideIn {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { opacity: 0; }
         }
     </style>
 </head>
@@ -48,75 +373,516 @@
     <div class="container bg-white p-8 rounded-lg shadow-xl w-full max-w-3xl">
         <h1 class="text-4xl font-extrabold text-center text-gray-900 mb-6">
             <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
-                Simple Log Aggregator
+                Advanced Log Aggregator
             </span>
         </h1>
         <p class="text-center text-gray-600 mb-8">
             Search through your GitHub-hosted logs.
         </p>
 
-        <div class="flex flex-col sm:flex-row gap-4 mb-8">
+        <!-- Login Section -->
+        <div id="loginSection" class="flex flex-col gap-4 mb-8">
+            <p class="text-center text-red-600 font-bold mb-2">
+                WARNING: This is client-side authentication only. Not for sensitive data!
+            </p>
+            <p class="text-center text-gray-700 mb-2">
+                Use Username: <span class="font-bold text-blue-700">user</span>, Password: <span class="font-bold text-blue-700">password</span>
+            </p>
             <input
                 type="text"
-                id="searchInput"
-                placeholder="Enter search query (e.g., ERROR, user_id)"
-                class="search-input flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm"
+                id="usernameInput"
+                placeholder="Username"
+                class="auth-input p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+            >
+            <input
+                type="password"
+                id="passwordInput"
+                placeholder="Password"
+                class="auth-input p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
             >
             <button
-                id="searchButton"
-                class="search-button bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                id="loginButton"
+                class="auth-button bg-gradient-to-r from-green-500 to-teal-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
             >
-                Search Logs
+                Login
             </button>
+            <p id="loginMessage" class="text-center text-red-500 hidden"></p>
         </div>
 
-        <div id="loadingIndicator" class="text-center text-blue-600 font-medium hidden mb-4">
-            Loading logs... Please wait.
-        </div>
+        <!-- Log Search Section (hidden by default) -->
+        <div id="logSearchSection" class="hidden">
+            <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                <input
+                    type="text"
+                    id="searchInput"
+                    placeholder="Enter search query (e.g., ERROR, user_id)"
+                    class="search-input flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                >
+                <button
+                    id="searchButton"
+                    class="search-button bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                    Search Logs
+                </button>
+                <button
+                    id="clearSearchButton"
+                    class="filter-button bg-gray-300 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 dark:bg-gray-600 dark:text-gray-200"
+                >
+                    Clear Search
+                </button>
+            </div>
 
-        <div id="results" class="space-y-4">
-            <!-- Search results will be displayed here -->
-            <p class="text-center text-gray-500" id="initialMessage">
-                Type a query and click 'Search Logs' to begin.
-            </p>
+            <!-- Search Options and Filters -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="caseSensitiveToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <span>Case Sensitive</span>
+                </label>
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="regexSearchToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <span>Regex Search</span>
+                </label>
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="fullPathToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded" checked>
+                    <span>Show Full Path</span>
+                </label>
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="lineWrapToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded" checked>
+                    <span>Line Wrap Results</span>
+                </label>
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="startsWithToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <span>Starts With</span>
+                </label>
+                <label class="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" id="endsWithToggle" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <span>Ends With</span>
+                </label>
+                <div>
+                    <label for="logLevelFilter" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Log Level:</label>
+                    <select id="logLevelFilter" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                        <option value="ALL">ALL</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                        <option value="DEBUG">DEBUG</option>
+                    </select>
+                </div>
+                <div class="relative">
+                    <label for="excludeKeywordInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Exclude Keyword:</label>
+                    <input type="text" id="excludeKeywordInput" placeholder="e.g., success" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <button id="clearExcludeKeyword" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+                <div class="relative">
+                    <label for="multiKeywordInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Multi-Keyword (comma-separated):</label>
+                    <input type="text" id="multiKeywordInput" placeholder="e.g., user, login, failed" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <select id="multiKeywordLogic" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                        <option value="AND">AND (all keywords)</option>
+                        <option value="OR">OR (any keyword)</option>
+                    </select>
+                    <button id="clearMultiKeyword" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+            </div>
+
+            <!-- Date & Time Range Filter -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 items-center">
+                <div class="relative">
+                    <label for="fromDate" class="text-gray-700 dark:text-gray-300">From Date:</label>
+                    <input type="date" id="fromDate" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm flex-grow w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <button id="clearFromDate" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+                <div class="relative">
+                    <label for="toDate" class="text-gray-700 dark:text-gray-300">To Date:</label>
+                    <input type="date" id="toDate" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm flex-grow w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <button id="clearToDate" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+                <div class="relative">
+                    <label for="fromTime" class="text-gray-700 dark:text-gray-300">From Time (HH:MM):</label>
+                    <input type="time" id="fromTime" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm flex-grow w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <button id="clearFromTime" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+                <div class="relative">
+                    <label for="toTime" class="text-gray-700 dark:text-gray-300">To Time (HH:MM):</label>
+                    <input type="time" id="toTime" class="filter-input p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm flex-grow w-full dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200">
+                    <button id="clearToTime" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hidden">✕</button>
+                </div>
+            </div>
+
+            <!-- File Selection -->
+            <div class="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Select Log Files:</h3>
+                <div class="flex gap-2 mb-2">
+                    <button id="selectAllFiles" class="bg-blue-200 text-blue-800 text-sm font-semibold py-1 px-3 rounded-md hover:bg-blue-300 transition duration-200 ease-in-out dark:bg-blue-700 dark:text-blue-100 dark:hover:bg-blue-600">Select All</button>
+                    <button id="deselectAllFiles" class="bg-red-200 text-red-800 text-sm font-semibold py-1 px-3 rounded-md hover:bg-red-300 transition duration-200 ease-in-out dark:bg-red-700 dark:text-red-100 dark:hover:bg-red-600">Deselect All</button>
+                </div>
+                <div id="fileSelectionContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border border-gray-200 rounded-md bg-gray-50 file-selection-container dark:bg-gray-700 dark:border-gray-600">
+                    <!-- File checkboxes will be dynamically inserted here -->
+                </div>
+            </div>
+
+            <!-- New Log File Creation Section (New) -->
+            <div class="mb-6 border border-dashed border-gray-300 p-4 rounded-lg dark:border-gray-600">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Create New Log File (In-Browser Only)</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">Enter content for a new log file. It will be named with today's date (e.g., `logs/YYYY-MM-DD.log`). **This does not save to GitHub directly.** You must download it and upload manually.</p>
+                <textarea id="newLogFileContent" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm h-32 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200" placeholder="Paste or type new log content here..."></textarea>
+                <button
+                    id="createNewLogFileButton"
+                    class="filter-button bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-600 mt-2"
+                >
+                    Create & Download New Log File
+                </button>
+            </div>
+
+            <!-- New Log Simulation Section (Existing) -->
+            <div class="mb-6 border border-dashed border-gray-300 p-4 rounded-lg dark:border-gray-600">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Simulate New Log Entry (In-Browser Only)</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">Paste new log lines below. These will be added to the selected file in your browser, but **will not persist to GitHub.**</p>
+                <select id="appendToFileSelect" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 mb-2">
+                    <!-- Options populated by JS -->
+                </select>
+                <textarea id="newLogInput" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out shadow-sm h-24 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200" placeholder="Paste new log lines here..."></textarea>
+                <button
+                    id="appendLogButton"
+                    class="filter-button bg-teal-500 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 mt-2"
+                >
+                    Append Log to Selected File
+                </button>
+            </div>
+
+            <div class="flex flex-wrap gap-4 mb-6 justify-center">
+                <button
+                    id="downloadResultsButton"
+                    class="filter-button bg-purple-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 w-full sm:w-auto"
+                >
+                    Download Search Results
+                </button>
+                <button
+                    id="downloadSelectedRawButton"
+                    class="filter-button bg-pink-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 w-full sm:w-auto"
+                >
+                    Download Selected Raw Logs (ZIP)
+                </button>
+                <button
+                    id="clearAllFiltersButton"
+                    class="filter-button bg-yellow-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 w-full sm:w-auto"
+                >
+                    Clear All Filters
+                </button>
+                <button
+                    id="savePresetButton"
+                    class="filter-button bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 w-full sm:w-auto"
+                >
+                    Save Search Preset
+                </button>
+                <button
+                    id="loadPresetButton"
+                    class="filter-button bg-indigo-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 w-full sm:w-auto"
+                >
+                    Load Search Preset
+                </button>
+                <button
+                    id="managePresetsButton"
+                    class="filter-button bg-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-700 w-full sm:w-auto"
+                >
+                    Manage Presets
+                </button>
+                <button
+                    id="exportPresetsButton"
+                    class="filter-button bg-orange-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-600 w-full sm:w-auto"
+                >
+                    Export Presets
+                </button>
+                <button
+                    id="importPresetsButton"
+                    class="filter-button bg-green-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-600 w-full sm:w-auto"
+                >
+                    Import Presets
+                </button>
+                <button
+                    id="clearLocalStorageButton"
+                    class="filter-button bg-red-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-600 w-full sm:w-auto"
+                >
+                    Clear All Saved Data
+                </button>
+                <button
+                    id="aboutButton"
+                    class="filter-button bg-gray-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-700 w-full sm:w-auto"
+                >
+                    About / Help
+                </button>
+                <button
+                    id="themeToggleButton"
+                    class="filter-button bg-gray-700 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-800 w-full sm:w-auto"
+                >
+                    Toggle Theme
+                </button>
+            </div>
+
+            <div id="loadingIndicator" class="text-center text-blue-600 font-medium mb-4 hidden">
+                <span class="spinner"></span> Loading logs... <span id="loadingFileName"></span>
+            </div>
+
+            <div id="results" class="space-y-4">
+                <p class="text-center text-gray-500" id="initialMessage">
+                    Type a query and click 'Search Logs' to begin.
+                </p>
+                <p class="text-center text-gray-500 hidden" id="noLogsLoadedMessage">
+                    No log files were loaded. Please check your GitHub username, repository name, and log file paths in the `index.html` script. Also, ensure the files exist in your `main` branch.
+                </p>
+            </div>
+            <p id="resultCount" class="text-center text-gray-700 mt-4 hidden">Found <span class="font-bold">0</span> matching lines. Keyword occurrences: <span class="font-bold" id="keywordOccurrences">0</span></p>
+        </div> <!-- End logSearchSection -->
+    </div>
+
+    <!-- About/Help Modal -->
+    <div id="aboutModal" class="modal">
+        <div class="modal-content dark:bg-gray-800 dark:text-gray-200">
+            <span class="close-button dark:text-gray-400 dark:hover:text-white" id="closeAboutModal">&times;</span>
+            <h2 class="text-2xl font-bold mb-4 text-gray-900 dark:text-white">About Advanced Log Aggregator</h2>
+            <p class="mb-2 text-gray-700 dark:text-gray-300">This is a basic, client-side log aggregation tool designed to work directly from GitHub Pages without any server-side installation.</p>
+            <h3 class="text-xl font-semibold mt-4 mb-2 text-gray-800 dark:text-gray-200">Features:</h3>
+            <ul class="list-disc list-inside text-gray-700 dark:text-gray-300">
+                <li>**Search Query:** Enter text to find in your logs.</li>
+                <li>**Case Sensitive Toggle:** Switch between case-sensitive and case-insensitive search.</li>
+                <li>**Regex Search Toggle:** Use regular expressions for advanced pattern matching.</li>
+                <li>**Starts With / Ends With:** Refine text search to beginning or end of lines.</li>
+                <li>**Exclude Keyword:** Filter out lines containing specific keywords.</li>
+                <li>**Multiple Keyword Search (AND/OR):** Search for multiple keywords with logical operators.</li>
+                <li>**Log Level Filter:** Filter logs by INFO, WARNING, ERROR, DEBUG levels.</li>
+                <li>**Date Range Filter:** Specify a start and end date to narrow down log entries.</li>
+                <li>**Time-of-Day Filter:** Filter logs by specific hours/minutes within a day.</li>
+                <li>**Select Log Files:** Choose which specific log files to include in your search.</li>
+                <li>**Select All/None Files:** Quick buttons to manage file selection.</li>
+                <li>**Log File Statistics:** Displays line count and approximate size for each loaded log.</li>
+                <li>**Download Search Results:** Save the current search results to a text file.</li>
+                <li>**Download Raw Log File:** Download the complete content of an individual log file.</li>
+                <li>**Export Selected Raw Logs (ZIP):** Download multiple selected raw log files as a single ZIP archive.</li>
+                <li>**Line Number Display:** Each matching line shows its original line number.</li>
+                <li>**Copy Line to Clipboard:** Easily copy any displayed log line.</li>
+                <li>**Go to Top/Bottom:** Quick navigation buttons for long results.</li>
+                <li>**Result Count:** See how many lines match your criteria.</li>
+                <li>**Keyword Frequency:** Shows how many times the search term appeared in results.</li>
+                <li>**Clear Search:** Reset the search input and results.</li>
+                <li>**Clear All Filters:** Reset all filter options (with confirmation).</li>
+                <li>**Filter Reset for Individual Filters:** Small 'x' buttons to clear specific filters.</li>
+                <li>**Save/Load Search Presets:** Store and recall your favorite search configurations.</li>
+                <li>**Manage Presets:** View, rename, or delete saved presets.</li>
+                <li>**Export/Import Presets:** Download/upload your saved presets as JSON files.</li>
+                <li>**Clear All Saved Data:** Delete all local storage data for the app.</li>
+                <li>**Theme Toggle:** Switch between light and dark mode.</li>
+                <li>**New Log File Creation:** Create a new log file in the browser and download it for manual GitHub upload.</li>
+                <li>**New Log Simulation:** Manually append log lines to existing logs (in-browser only, not persistent to GitHub).</li>
+                <li>**Drag-and-Drop Local Files:** Load local `.log` or `.txt` files directly into the browser for temporary searching.</li>
+                <li>**Toggle Full File Path:** Switch between displaying full path or just filename in results.</li>
+                <li>**Line Wrapping Toggle:** Control if log lines wrap or require horizontal scrolling.</li>
+                <li>**Search History:** A simple dropdown to recall recent search queries.</li>
+                <li>**Clickable Log Levels:** Clicking on a log level (e.g., INFO, ERROR) in a result line applies it as a filter.</li>
+                <li>**Timestamp Click to Filter Date:** Clicking a timestamp in a result line populates the date filter.</li>
+                <li>**Toast Notifications:** Non-intrusive feedback for actions.</li>
+                <li>**Keyboard Shortcuts:** For common actions (e.g., Enter to search, Esc to close modal, Ctrl+S to save preset, Ctrl+L to load preset, Ctrl+C to clear search).</li>
+                <li>**Persistent Settings:** Remembers your filter settings and theme across sessions.</li>
+                <li>**Enhanced Error/Info Messages:** Clearer and better-styled messages for various states.</li>
+                <li>**Per-File Loading Progress:** Shows which file is currently being loaded.</li>
+                <li>**Version Display:** Small version number in the footer.</li>
+            </ul>
+            <h3 class="text-xl font-semibold mt-4 mb-2 text-gray-800 dark:text-gray-200">Limitations:</h3>
+            <ul class="list-disc list-inside text-red-600 dark:text-red-400">
+                <li>**Client-Side Only:** All processing happens in your browser. It cannot handle very large log files efficiently (performance degrades with huge files).</li>
+                <li>**No Real Security:** The authentication is purely client-side for demonstration. Log files in public repositories are still publicly accessible via their raw URLs. **DO NOT use for sensitive data.**</li>
+                <li>**No Real-time Aggregation:** Logs must be manually committed to GitHub.</li>
+                <li>**Simulated Logs Not Persistent:** Log lines added via "Simulate New Log Entry" are only in your browser session and are lost on page refresh.</li>
+                <li>**No Server-side Features:** Cannot connect to external databases, perform complex server-side analytics, or handle multi-user persistent data.</li>
+            </ul>
+            <p class="text-sm text-gray-500 mt-4 dark:text-gray-400">Version: 1.3.1</p>
         </div>
     </div>
 
+    <!-- Scroll to Top/Bottom Buttons -->
+    <button id="scrollToTopBtn" class="scroll-button hidden">&#9650;</button>
+    <button id="scrollToBottomBtn" class="scroll-button hidden" style="bottom: 20px;">&#9660;</button>
+
+    <!-- Hidden input for file import -->
+    <input type="file" id="importPresetsFile" accept=".json" class="hidden">
+    <input type="file" id="localFileInput" accept=".log,.txt" multiple class="hidden">
+
+
     <script>
         // Define the GitHub repository details
-        // =================================================================================================
-        // IMPORTANT: These values have been updated based on the GitHub link you provided.
-        // Ensure they match your actual GitHub username and repository name exactly.
-        // =================================================================================================
         const GITHUB_USERNAME = 'WheelFate'; // Your GitHub username
         const REPOSITORY_NAME = 'simple-log-aggregator'; // Your repository name
 
         // Define the paths to your log files within the repository.
-        // =================================================================================================
-        // This array has been updated with the log file path you provided.
-        // If you add more log files, make sure to add their exact, case-sensitive paths here.
-        // =================================================================================================
-        const LOG_FILE_PATHS = [
-            `logs/web-server/2025-07-13.log`, // Log file path from your GitHub link
+        // IMPORTANT: Add all your log file paths here.
+        // Changed from const to let because new local files can be added to this array.
+        let LOG_FILE_PATHS = [
+            `logs/web-server/2025-07-13.log`,
             // Add more log file paths here as you create them:
             // `logs/app-server/2025-07-12.log`,
             // `logs/database/errors.log`,
+            // `logs/another-service/2025-07-14.log`, // Example of another log file
         ];
+
+        // --- CLIENT-SIDE AUTHENTICATION CONFIGURATION (FOR DEMO ONLY - NOT SECURE) ---
+        const AUTH_USERNAME = 'user';
+        const AUTH_PASSWORD = 'password';
+
+        // DOM Elements for Authentication
+        const loginSection = document.getElementById('loginSection');
+        const usernameInput = document.getElementById('usernameInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginButton = document.getElementById('loginButton');
+        const loginMessage = document.getElementById('loginMessage');
+        const logSearchSection = document.getElementById('logSearchSection');
+
+        // DOM Elements for Log Search
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const clearSearchButton = document.getElementById('clearSearchButton');
+        const caseSensitiveToggle = document.getElementById('caseSensitiveToggle');
+        const regexSearchToggle = document.getElementById('regexSearchToggle');
+        const fullPathToggle = document.getElementById('fullPathToggle');
+        const lineWrapToggle = document.getElementById('lineWrapToggle');
+        const startsWithToggle = document.getElementById('startsWithToggle');
+        const endsWithToggle = document.getElementById('endsWithToggle');
+        const logLevelFilter = document.getElementById('logLevelFilter');
+        const excludeKeywordInput = document.getElementById('excludeKeywordInput');
+        const clearExcludeKeywordButton = document.getElementById('clearExcludeKeyword');
+        const multiKeywordInput = document.getElementById('multiKeywordInput');
+        const multiKeywordLogic = document.getElementById('multiKeywordLogic');
+        const clearMultiKeywordButton = document.getElementById('clearMultiKeyword');
+        const fromDateInput = document.getElementById('fromDate');
+        const clearFromDateButton = document.getElementById('clearFromDate');
+        const toDateInput = document.getElementById('toDate');
+        const clearToDateButton = document.getElementById('clearToDate');
+        const fromTimeInput = document.getElementById('fromTime');
+        const clearFromTimeButton = document.getElementById('clearFromTime');
+        const toTimeInput = document.getElementById('toTime');
+        const clearToTimeButton = document.getElementById('clearToTime');
+        const downloadResultsButton = document.getElementById('downloadResultsButton');
+        const downloadSelectedRawButton = document.getElementById('downloadSelectedRawButton');
+        const clearAllFiltersButton = document.getElementById('clearAllFiltersButton');
+        const savePresetButton = document.getElementById('savePresetButton');
+        const loadPresetButton = document.getElementById('loadPresetButton');
+        const managePresetsButton = document.getElementById('managePresetsButton');
+        const exportPresetsButton = document.getElementById('exportPresetsButton');
+        const importPresetsButton = document.getElementById('importPresetsButton');
+        const clearLocalStorageButton = document.getElementById('clearLocalStorageButton');
+        const aboutButton = document.getElementById('aboutButton');
+        const themeToggleButton = document.getElementById('themeToggleButton');
+        const fileSelectionContainer = document.getElementById('fileSelectionContainer');
+        const selectAllFilesButton = document.getElementById('selectAllFiles');
+        const deselectAllFilesButton = document.getElementById('deselectAllFiles');
+        const resultsDiv = document.getElementById('results');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const loadingFileNameSpan = document.getElementById('loadingFileName');
+        const initialMessage = document.getElementById('initialMessage');
+        const noLogsLoadedMessage = document.getElementById('noLogsLoadedMessage');
+        const resultCountSpan = document.getElementById('resultCount').querySelector('span');
+        const keywordOccurrencesSpan = document.getElementById('keywordOccurrences');
+        const resultCountContainer = document.getElementById('resultCount');
+
+        // New Log File Creation Elements
+        const newLogFileContentInput = document.getElementById('newLogFileContent');
+        const createNewLogFileButton = document.getElementById('createNewLogFileButton');
+
+        // New Log Simulation Elements
+        const appendToFileSelect = document.getElementById('appendToFileSelect');
+        const newLogInput = document.getElementById('newLogInput');
+        const appendLogButton = document.getElementById('appendLogButton');
+
+        // Modal Elements
+        const aboutModal = document.getElementById('aboutModal');
+        const closeAboutModal = document.getElementById('closeAboutModal');
+
+        // Scroll Buttons
+        const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+
+        // Hidden input for file import
+        const importPresetsFileInput = document.getElementById('importPresetsFile');
+        const localFileInput = document.getElementById('localFileInput');
 
         // Store fetched log content
         let allLogsContent = {}; // { 'file_path': 'content_string', ... }
+        let searchHistory = []; // Stores recent search queries
+        const MAX_SEARCH_HISTORY = 10; // Max items in search history
 
-        const searchInput = document.getElementById('searchInput');
-        const searchButton = document.getElementById('searchButton');
-        const resultsDiv = document.getElementById('results');
-        const loadingIndicator = document.getElementById('loadingIndicator');
-        const initialMessage = document.getElementById('initialMessage');
+        // Debounce function for search input
+        let searchTimeout;
+        const DEBOUNCE_DELAY = 300; // ms
+
+        function debounce(func, delay) {
+            return function(...args) {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        // Function to show a custom message box (instead of alert/confirm)
+        function showMessageBox(message, type = 'info', onConfirm = null, onCancel = null) {
+            const existingMessageBox = document.querySelector('.confirm-modal-box');
+            if (existingMessageBox) existingMessageBox.remove(); // Remove any existing box
+
+            const messageBox = document.createElement('div');
+            messageBox.className = `confirm-modal-box ${type}`;
+            
+            let buttonsHtml = '';
+            if (type === 'confirm') {
+                buttonsHtml = `
+                    <button class="confirm-yes" id="messageBoxConfirmYes">Yes</button>
+                    <button class="confirm-no" id="messageBoxConfirmNo">No</button>
+                `;
+            } else {
+                messageBox.className = `toast-message ${type}`;
+                messageBox.innerHTML = `<p>${message}</p>`;
+                document.body.appendChild(messageBox);
+                setTimeout(() => messageBox.remove(), 3000);
+                return;
+            }
+
+            messageBox.innerHTML = `<p class="font-semibold mb-4">${message}</p>${buttonsHtml}`;
+            document.body.appendChild(messageBox);
+
+            if (type === 'confirm') {
+                document.getElementById('messageBoxConfirmYes').onclick = () => {
+                    messageBox.remove();
+                    if (onConfirm) onConfirm();
+                };
+                document.getElementById('messageBoxConfirmNo').onclick = () => {
+                    messageBox.remove();
+                    if (onCancel) onCancel();
+                };
+            }
+        }
+
+        // Function to handle login
+        function handleLogin() {
+            const enteredUsername = usernameInput.value;
+            const enteredPassword = passwordInput.value;
+
+            if (enteredUsername === AUTH_USERNAME && enteredPassword === AUTH_PASSWORD) {
+                loginSection.classList.add('hidden');
+                logSearchSection.classList.remove('hidden');
+                loginMessage.classList.add('hidden');
+                populateFileSelection();
+                populateAppendToFileSelect();
+                loadAllLogs();
+                loadPersistentSettings();
+                loadSearchHistory();
+            } else {
+                loginMessage.textContent = 'Invalid username or password.';
+                loginMessage.classList.remove('hidden');
+                usernameInput.value = '';
+                passwordInput.value = '';
+                showMessageBox('Invalid credentials.', 'error');
+            }
+        }
 
         // Function to fetch a single log file
         async function fetchLogFile(filePath) {
-            // Constructs the URL to fetch the raw content of the file from GitHub
             const rawUrl = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPOSITORY_NAME}/main/${filePath}`;
-            console.log(`Attempting to fetch: ${rawUrl}`); // Log the URL being fetched for debugging
+            console.log(`Attempting to fetch: ${rawUrl}`);
+            loadingFileNameSpan.textContent = `Fetching ${filePath.split('/').pop()}...`;
             try {
                 const response = await fetch(rawUrl);
                 if (!response.ok) {
@@ -136,7 +902,8 @@
         async function loadAllLogs() {
             loadingIndicator.classList.remove('hidden');
             initialMessage.classList.add('hidden');
-            resultsDiv.innerHTML = ''; // Clear any previous messages
+            noLogsLoadedMessage.classList.add('hidden');
+            resultsDiv.innerHTML = '';
             
             const fetchPromises = LOG_FILE_PATHS.map(async (filePath) => {
                 const content = await fetchLogFile(filePath);
@@ -146,80 +913,1049 @@
             });
             await Promise.all(fetchPromises);
             loadingIndicator.classList.add('hidden');
+            loadingFileNameSpan.textContent = '';
 
-            console.log('Finished loading logs. allLogsContent:', allLogsContent); // Log the loaded content for verification
+            console.log('Finished loading logs. allLogsContent:', allLogsContent);
 
             if (Object.keys(allLogsContent).length === 0) {
-                resultsDiv.innerHTML = '<p class="text-center text-red-500 font-bold">Failed to load any log files. Please check the following:</p>' +
-                                       '<ul class="list-disc list-inside text-left mx-auto max-w-md text-red-500">' +
-                                       '<li><strong>Your GitHub Username and Repository Name:</strong> Ensure `GITHUB_USERNAME` and `REPOSITORY_NAME` in the `index.html` script are exactly correct and case-sensitive.</li>' +
-                                       '<li><strong>Log File Paths:</strong> Verify that each path in the `LOG_FILE_PATHS` array is an exact, case-sensitive match to your files in the GitHub repository.</li>' +
-                                       '<li><strong>File Existence:</strong> Confirm that the log files actually exist in your GitHub repository\'s `main` branch.</li>' +
-                                       '<li><strong>Browser Console:</strong> Open your browser\'s developer console (usually F12) for specific error messages (e.g., 404 Not Found, CORS issues).</li>' +
-                                       '</ul>';
+                noLogsLoadedMessage.classList.remove('hidden');
+                resultsDiv.innerHTML = '';
             } else {
-                initialMessage.classList.remove('hidden'); // Show initial message if logs loaded successfully
+                initialMessage.classList.remove('hidden');
             }
         }
+
+        // Populate file selection checkboxes and display stats
+        function populateFileSelection() {
+            fileSelectionContainer.innerHTML = '';
+            // Sort LOG_FILE_PATHS alphabetically for consistent display
+            const sortedFilePaths = [...LOG_FILE_PATHS].sort();
+
+            sortedFilePaths.forEach(filePath => {
+                const fileName = filePath.split('/').pop();
+                const content = allLogsContent[filePath] || '';
+                // Robust line count: filter out empty strings from split
+                const lineCount = content.split('\n').filter(line => line.length > 0).length; 
+                const fileSizeKB = (new TextEncoder().encode(content).length / 1024).toFixed(2);
+
+                const div = document.createElement('div');
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <input type="checkbox" id="file-${fileName.replace(/\./g, '-')}" value="${filePath}" checked class="form-checkbox h-4 w-4 text-blue-600 rounded file-select-checkbox dark:bg-gray-600 dark:border-gray-500">
+                    <label for="file-${fileName.replace(/\./g, '-')}" class="ml-2 text-gray-700 text-sm dark:text-gray-300">
+                        ${filePath} <span class="text-gray-500 text-xs dark:text-gray-400">(${lineCount} lines, ${fileSizeKB} KB)</span>
+                    </label>
+                `;
+                fileSelectionContainer.appendChild(div);
+            });
+        }
+
+        // Populate dropdown for appending new logs
+        function populateAppendToFileSelect() {
+            appendToFileSelect.innerHTML = '';
+            // Sort LOG_FILE_PATHS alphabetically for consistent display
+            const sortedFilePaths = [...LOG_FILE_PATHS].sort();
+
+            if (sortedFilePaths.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No log files available to append to.';
+                appendToFileSelect.appendChild(option);
+                appendLogButton.disabled = true;
+                newLogInput.disabled = true;
+                return;
+            }
+            sortedFilePaths.forEach(filePath => {
+                const option = document.createElement('option');
+                option.value = filePath;
+                option.textContent = filePath;
+                appendToFileSelect.appendChild(option);
+            });
+            appendLogButton.disabled = false;
+            newLogInput.disabled = false;
+        }
+
+        // Append new log lines to an existing log file in allLogsContent (in-browser only)
+        function appendNewLog() {
+            const selectedFilePath = appendToFileSelect.value;
+            const newLogLines = newLogInput.value.trim();
+
+            if (!selectedFilePath) {
+                showMessageBox('Please select a log file to append to.', 'info');
+                return;
+            }
+            if (!newLogLines) {
+                showMessageBox('Please enter content to append.', 'info');
+                return;
+            }
+
+            if (allLogsContent[selectedFilePath]) {
+                // Ensure a newline if content already exists and new lines are added
+                allLogsContent[selectedFilePath] += (allLogsContent[selectedFilePath].endsWith('\n') ? '' : '\n') + newLogLines;
+                showMessageBox(`Appended ${newLogLines.split('\n').length} lines to ${selectedFilePath.split('/').pop()}.`, 'success');
+                newLogInput.value = '';
+                populateFileSelection(); // Update stats for the file
+                performSearch();
+            } else {
+                showMessageBox(`Error: Log file ${selectedFilePath} not found in loaded content.`, 'error');
+            }
+        }
+
+        // Create New Log File Functionality
+        function createNewLogFile() {
+            const newContent = newLogFileContentInput.value.trim();
+            if (!newContent) {
+                showMessageBox('Please enter content for the new log file.', 'info');
+                return;
+            }
+
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            let baseFilename = `logs/${year}-${month}-${day}.log`;
+            let counter = 0;
+            let finalFilePath = baseFilename;
+
+            // Check for existing files with the same date and append counter
+            while (LOG_FILE_PATHS.includes(finalFilePath)) {
+                counter++;
+                finalFilePath = `logs/${year}-${month}-${day}-${counter}.log`;
+            }
+
+            allLogsContent[finalFilePath] = newContent;
+            LOG_FILE_PATHS.push(finalFilePath); // Add to the mutable list of file paths
+
+            populateFileSelection(); // Update file list with new file
+            populateAppendToFileSelect(); // Update append dropdown
+            newLogFileContentInput.value = ''; // Clear input
+
+            showMessageBox(`New log file "${finalFilePath.split('/').pop()}" created in-browser.`, 'success', () => {
+                // Prompt to download
+                const blob = new Blob([newContent], { type: 'text/plain;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = finalFilePath.split('/').pop(); // Suggest original filename
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showMessageBox('Please remember to manually upload this file to your GitHub repository for permanent storage.', 'info');
+            });
+            performSearch(); // Re-run search to include the new file
+        }
+
+        // Clear search results and input
+        function clearSearch() {
+            searchInput.value = '';
+            resultsDiv.innerHTML = '<p class="text-center text-gray-500" id="initialMessage">Type a query and click \'Search Logs\' to begin.</p>';
+            initialMessage.classList.remove('hidden');
+            resultCountContainer.classList.add('hidden');
+            resultCountSpan.textContent = '0';
+            keywordOccurrencesSpan.textContent = '0';
+            const searchHistorySelect = document.getElementById('searchHistorySelect');
+            if (searchHistorySelect) searchHistorySelect.value = '';
+        }
+
+        // Clear all filters
+        function clearAllFilters() {
+            showMessageBox('Are you sure you want to clear all filters and settings?', 'confirm', () => {
+                caseSensitiveToggle.checked = false;
+                regexSearchToggle.checked = false;
+                fullPathToggle.checked = true;
+                lineWrapToggle.checked = true;
+                startsWithToggle.checked = false;
+                endsWithToggle.checked = false;
+                logLevelFilter.value = 'ALL';
+                excludeKeywordInput.value = '';
+                multiKeywordInput.value = '';
+                multiKeywordLogic.value = 'AND';
+                fromDateInput.value = '';
+                toDateInput.value = '';
+                fromTimeInput.value = '';
+                toTimeInput.value = '';
+                
+                document.querySelectorAll('.file-select-checkbox').forEach(cb => {
+                    cb.checked = true;
+                });
+                applyLineWrapSetting();
+                clearSearch();
+                savePersistentSettings();
+                updateClearButtonVisibility();
+                showMessageBox('All filters and settings cleared.', 'success');
+            });
+        }
+
+        // Download search results
+        function downloadSearchResults() {
+            const resultsText = resultsDiv.innerText;
+            if (resultsText.trim() === '' || resultsText.includes('No results found') || resultsText.includes('Please enter a search query')) {
+                showMessageBox('No search results to download or search is empty.', 'info');
+                return;
+            }
+            const blob = new Blob([resultsText], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `log_search_results_${new Date().toISOString().slice(0, 10)}.txt`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showMessageBox('Search results downloaded!', 'success');
+        }
+
+        // Download raw log file
+        function downloadRawLogFile(filePath) {
+            const content = allLogsContent[filePath];
+            if (!content) {
+                showMessageBox(`Log content for ${filePath} not found.`, 'error');
+                return;
+            }
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filePath.split('/').pop();
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showMessageBox(`${filePath.split('/').pop()} downloaded!`, 'success');
+        }
+
+        // Download selected raw log files as ZIP
+        async function downloadSelectedRawLogsZip() {
+            const selectedFileCheckboxes = document.querySelectorAll('.file-select-checkbox:checked');
+            const filesToZip = Array.from(selectedFileCheckboxes).map(cb => cb.value);
+
+            if (filesToZip.length === 0) {
+                showMessageBox('No log files selected for download.', 'info');
+                return;
+            }
+
+            const zip = new JSZip();
+            let filesAdded = 0;
+            let errors = 0;
+
+            showMessageBox('Preparing ZIP file... This may take a moment.', 'info');
+
+            for (const filePath of filesToZip) {
+                const content = allLogsContent[filePath];
+                if (content) {
+                    zip.file(filePath.replace(/^(logs\/|local\/)/, ''), content); // Remove 'logs/' or 'local/' prefix for cleaner zip structure
+                    filesAdded++;
+                } else {
+                    console.warn(`Content for ${filePath} not found, skipping.`);
+                    errors++;
+                }
+            }
+
+            if (filesAdded === 0) {
+                showMessageBox('No content found for selected files to create ZIP.', 'error');
+                return;
+            }
+
+            try {
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(zipBlob);
+                link.download = `selected_logs_${new Date().toISOString().slice(0, 10)}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showMessageBox(`Successfully downloaded ${filesAdded} log files in a ZIP.`, 'success');
+                if (errors > 0) {
+                    showMessageBox(`${errors} file(s) could not be added to the ZIP due to missing content. Check console for details.`, 'warning');
+                }
+            } catch (error) {
+                console.error("Error generating ZIP:", error);
+                showMessageBox('Failed to generate ZIP file.', 'error');
+            }
+        }
+
+        // Copy line to clipboard
+        function copyLineToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showMessageBox('Copied to clipboard!', 'success');
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                showMessageBox('Failed to copy text.', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // Save search preset
+        function saveSearchPreset() {
+            const presetName = prompt('Enter a name for this search preset:');
+            if (!presetName) {
+                showMessageBox('Preset save cancelled.', 'info');
+                return;
+            }
+
+            let savedPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+            const preset = {
+                query: searchInput.value,
+                caseSensitive: caseSensitiveToggle.checked,
+                regexSearch: regexSearchToggle.checked,
+                fullPath: fullPathToggle.checked,
+                lineWrap: lineWrapToggle.checked,
+                startsWith: startsWithToggle.checked,
+                endsWith: endsWithToggle.checked,
+                logLevel: logLevelFilter.value,
+                excludeKeyword: excludeKeywordInput.value,
+                multiKeyword: multiKeywordInput.value,
+                multiKeywordLogic: multiKeywordLogic.value,
+                fromDate: fromDateInput.value,
+                toDate: toDateInput.value,
+                fromTime: fromTimeInput.value,
+                toTime: toTimeInput.value,
+                selectedFiles: Array.from(document.querySelectorAll('.file-select-checkbox:checked')).map(cb => cb.value)
+            };
+            savedPresets[presetName] = preset;
+            localStorage.setItem('logAggregatorPresets', JSON.stringify(savedPresets));
+            showMessageBox(`Preset "${presetName}" saved!`, 'success');
+        }
+
+        // Load search preset
+        function loadSearchPreset() {
+            let savedPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+            const presetNames = Object.keys(savedPresets);
+
+            if (presetNames.length === 0) {
+                showMessageBox('No saved presets found.', 'info');
+                return;
+            }
+
+            const presetName = prompt('Enter the name of the preset to load:\n' + presetNames.join('\n'));
+            if (!presetName) {
+                showMessageBox('Preset load cancelled.', 'info');
+                return;
+            }
+
+            const preset = savedPresets[presetName];
+            if (preset) {
+                searchInput.value = preset.query || '';
+                caseSensitiveToggle.checked = preset.caseSensitive || false;
+                regexSearchToggle.checked = preset.regexSearch || false;
+                fullPathToggle.checked = preset.fullPath !== undefined ? preset.fullPath : true;
+                lineWrapToggle.checked = preset.lineWrap !== undefined ? preset.lineWrap : true;
+                startsWithToggle.checked = preset.startsWith || false;
+                endsWithToggle.checked = preset.endsWith || false;
+                logLevelFilter.value = preset.logLevel || 'ALL';
+                excludeKeywordInput.value = preset.excludeKeyword || '';
+                multiKeywordInput.value = preset.multiKeyword || '';
+                multiKeywordLogic.value = preset.multiKeywordLogic || 'AND';
+                fromDateInput.value = preset.fromDate || '';
+                toDateInput.value = preset.toDate || '';
+                fromTimeInput.value = preset.fromTime || '';
+                toTimeInput.value = preset.toTime || '';
+
+                // Restore selected files
+                document.querySelectorAll('.file-select-checkbox').forEach(cb => {
+                    cb.checked = preset.selectedFiles ? preset.selectedFiles.includes(cb.value) : true;
+                });
+                
+                applyLineWrapSetting();
+                updateClearButtonVisibility();
+                showMessageBox(`Preset "${presetName}" loaded!`, 'success');
+                performSearch();
+            } else {
+                showMessageBox(`Preset "${presetName}" not found.`, 'error');
+            }
+        }
+
+        // Manage Presets
+        function managePresets() {
+            let savedPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+            const presetNames = Object.keys(savedPresets);
+
+            if (presetNames.length === 0) {
+                showMessageBox('No saved presets to manage.', 'info');
+                return;
+            }
+
+            let presetListHtml = '<ul class="list-disc list-inside text-left">';
+            presetNames.forEach(name => {
+                presetListHtml += `<li class="mb-1">${name} <button onclick="renamePreset('${name}')" class="ml-2 text-blue-500 hover:underline text-sm">Rename</button> <button onclick="deletePreset('${name}')" class="text-red-500 hover:underline text-sm">Delete</button></li>`;
+            });
+            presetListHtml += '</ul>';
+
+            showMessageBox(`<h3>Manage Presets:</h3>${presetListHtml}`, 'info', null, null);
+        }
+
+        function renamePreset(oldName) {
+            showMessageBox(`Rename preset "${oldName}"?`, 'confirm', () => {
+                const newName = prompt(`Enter new name for "${oldName}":`);
+                if (newName && newName.trim() !== '' && newName !== oldName) { // Added trim and empty check
+                    let savedPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+                    if (savedPresets[newName]) {
+                        showMessageBox(`Preset "${newName}" already exists.`, 'error');
+                        return;
+                    }
+                    savedPresets[newName] = savedPresets[oldName];
+                    delete savedPresets[oldName];
+                    localStorage.setItem('logAggregatorPresets', JSON.stringify(savedPresets));
+                    showMessageBox(`Preset "${oldName}" renamed to "${newName}".`, 'success');
+                    managePresets();
+                } else if (newName === oldName) {
+                    showMessageBox('New name is the same as old name.', 'info');
+                } else {
+                    showMessageBox('Rename cancelled or invalid name.', 'info'); // Improved message
+                }
+            });
+        }
+
+        function deletePreset(presetName) {
+            showMessageBox(`Are you sure you want to delete preset "${presetName}"?`, 'confirm', () => {
+                let savedPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+                delete savedPresets[presetName];
+                localStorage.setItem('logAggregatorPresets', JSON.stringify(savedPresets));
+                showMessageBox(`Preset "${presetName}" deleted.`, 'success');
+                managePresets();
+            });
+        }
+
+        // Export Presets
+        function exportPresets() {
+            const presets = localStorage.getItem('logAggregatorPresets');
+            if (!presets || Object.keys(JSON.parse(presets)).length === 0) {
+                showMessageBox('No presets to export.', 'info');
+                return;
+            }
+            const blob = new Blob([presets], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `log_aggregator_presets_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showMessageBox('Presets exported to JSON file.', 'success');
+        }
+
+        // Import Presets
+        function importPresets() {
+            importPresetsFileInput.click();
+        }
+
+        importPresetsFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                showMessageBox('No file selected.', 'info');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedPresets = JSON.parse(e.target.result);
+                    if (typeof importedPresets !== 'object' || importedPresets === null) {
+                        throw new Error('Invalid JSON format.');
+                    }
+                    let currentPresets = JSON.parse(localStorage.getItem('logAggregatorPresets') || '{}');
+                    const mergedPresets = { ...currentPresets, ...importedPresets };
+                    localStorage.setItem('logAggregatorPresets', JSON.stringify(mergedPresets));
+                    showMessageBox('Presets imported successfully!', 'success');
+                } catch (error) {
+                    showMessageBox(`Error importing presets: ${error.message}`, 'error');
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // Clear All Saved Data
+        function clearAllLocalStorage() {
+            showMessageBox('Are you sure you want to clear ALL saved settings and presets? This cannot be undone.', 'confirm', () => {
+                localStorage.clear();
+                showMessageBox('All saved data cleared!', 'success');
+                location.reload();
+            });
+        }
+
+        // Save persistent settings
+        function savePersistentSettings() {
+            const settings = {
+                caseSensitive: caseSensitiveToggle.checked,
+                regexSearch: regexSearchToggle.checked,
+                fullPath: fullPathToggle.checked,
+                lineWrap: lineWrapToggle.checked,
+                startsWith: startsWithToggle.checked,
+                endsWith: endsWithToggle.checked,
+                logLevel: logLevelFilter.value,
+                excludeKeyword: excludeKeywordInput.value,
+                multiKeyword: multiKeywordInput.value,
+                multiKeywordLogic: multiKeywordLogic.value,
+                fromDate: fromDateInput.value,
+                toDate: toDateInput.value,
+                fromTime: fromTimeInput.value,
+                toTime: toTimeInput.value,
+                selectedFiles: Array.from(document.querySelectorAll('.file-select-checkbox:checked')).map(cb => cb.value),
+                theme: document.body.classList.contains('dark') ? 'dark' : 'light'
+            };
+            localStorage.setItem('logAggregatorSettings', JSON.stringify(settings));
+        }
+
+        // Load persistent settings
+        function loadPersistentSettings() {
+            const storedSettings = localStorage.getItem('logAggregatorSettings');
+            if (storedSettings) {
+                const settings = JSON.parse(storedSettings);
+                caseSensitiveToggle.checked = settings.caseSensitive || false;
+                regexSearchToggle.checked = settings.regexSearch || false;
+                fullPathToggle.checked = settings.fullPath !== undefined ? settings.fullPath : true;
+                lineWrapToggle.checked = settings.lineWrap !== undefined ? settings.lineWrap : true;
+                startsWithToggle.checked = settings.startsWith || false;
+                endsWithToggle.checked = settings.endsWith || false;
+                logLevelFilter.value = settings.logLevel || 'ALL';
+                excludeKeywordInput.value = settings.excludeKeyword || '';
+                multiKeywordInput.value = settings.multiKeyword || '';
+                multiKeywordLogic.value = settings.multiKeywordLogic || 'AND';
+                fromDateInput.value = settings.fromDate || '';
+                toDateInput.value = settings.toDate || '';
+                fromTimeInput.value = settings.fromTime || '';
+                toTimeInput.value = settings.toTime || '';
+
+                // Restore selected files after populateFileSelection has run
+                // This is handled in the login success path.
+                
+                // Apply theme
+                if (settings.theme === 'dark') {
+                    document.body.classList.add('dark');
+                } else {
+                    document.body.classList.remove('dark');
+                }
+                applyLineWrapSetting();
+                updateClearButtonVisibility();
+            }
+        }
+
+        // Toggle Theme
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            savePersistentSettings();
+        }
+
+        // Apply line wrap setting to results
+        function applyLineWrapSetting() {
+            const shouldWrap = lineWrapToggle.checked;
+            document.querySelectorAll('.log-entry').forEach(entry => {
+                if (shouldWrap) {
+                    entry.classList.remove('no-wrap');
+                } else {
+                    entry.classList.add('no-wrap');
+                }
+            });
+        }
+
+        // Update visibility of clear buttons for filters
+        function updateClearButtonVisibility() {
+            clearExcludeKeywordButton.classList.toggle('hidden', excludeKeywordInput.value === '');
+            clearMultiKeywordButton.classList.toggle('hidden', multiKeywordInput.value === '');
+            clearFromDateButton.classList.toggle('hidden', fromDateInput.value === '');
+            clearToDateButton.classList.toggle('hidden', toDateInput.value === '');
+            clearFromTimeButton.classList.toggle('hidden', fromTimeInput.value === '');
+            clearToTimeButton.classList.toggle('hidden', toTimeInput.value === '');
+        }
+
+        // Load local log files via drag-and-drop
+        function handleLocalFiles(files) {
+            if (files.length === 0) return;
+
+            showMessageBox(`Loading ${files.length} local file(s)...`, 'info');
+            let loadedCount = 0;
+            let failedCount = 0;
+
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const content = e.target.result;
+                    const filePath = `local/${file.name}`; // Prefix with 'local/' to distinguish
+                    allLogsContent[filePath] = content;
+                    // Only add to LOG_FILE_PATHS if it's not already there (e.g., if a file is dropped multiple times)
+                    if (!LOG_FILE_PATHS.includes(filePath)) {
+                        LOG_FILE_PATHS.push(filePath);
+                    }
+                    populateFileSelection(); // Re-populate file selection with new files
+                    populateAppendToFileSelect(); // Update append dropdown
+                    loadedCount++;
+                    if (loadedCount + failedCount === files.length) {
+                        showMessageBox(`Successfully loaded ${loadedCount} local file(s).`, 'success');
+                        if (failedCount > 0) {
+                            showMessageBox(`${failedCount} file(s) failed to load.`, 'warning');
+                        }
+                    }
+                };
+                reader.onerror = () => {
+                    console.error(`Failed to read local file: ${file.name}`);
+                    failedCount++;
+                    if (loadedCount + failedCount === files.length) {
+                        showMessageBox(`Failed to load ${failedCount} local file(s).`, 'error');
+                    }
+                };
+                reader.readAsText(file);
+            });
+        }
+
 
         // Function to perform the search
         function performSearch() {
             const query = searchInput.value.trim();
-            resultsDiv.innerHTML = ''; // Clear previous results
+            resultsDiv.innerHTML = '';
+            resultCountContainer.classList.add('hidden');
+            resultCountSpan.textContent = '0';
+            keywordOccurrencesSpan.textContent = '0';
 
-            if (query === '') {
-                resultsDiv.innerHTML = '<p class="text-center text-gray-500">Please enter a search query.</p>';
+            if (query && !searchHistory.includes(query)) {
+                searchHistory.unshift(query);
+                if (searchHistory.length > MAX_SEARCH_HISTORY) {
+                    searchHistory.pop();
+                }
+                saveSearchHistory();
+                populateSearchHistory();
+            }
+
+            if (query === '' && logLevelFilter.value === 'ALL' && !fromDateInput.value && !toDateInput.value && !fromTimeInput.value && !toTimeInput.value && excludeKeywordInput.value === '' && multiKeywordInput.value === '' && Array.from(document.querySelectorAll('.file-select-checkbox:checked')).length === LOG_FILE_PATHS.length) {
+                resultsDiv.innerHTML = '<p class="text-center text-gray-500">Please enter a search query or apply filters.</p>';
                 return;
             }
 
-            let foundResults = false;
-            const lowerCaseQuery = query.toLowerCase();
+            const isCaseSensitive = caseSensitiveToggle.checked;
+            const useRegex = regexSearchToggle.checked;
+            const showFullPath = fullPathToggle.checked;
+            const shouldWrapLines = lineWrapToggle.checked;
+            const isStartsWith = startsWithToggle.checked;
+            const isEndsWith = endsWithToggle.checked;
+            const selectedLogLevel = logLevelFilter.value;
+            const excludeKeyword = excludeKeywordInput.value.trim();
+            const multiKeywords = multiKeywordInput.value.split(',').map(k => k.trim()).filter(k => k !== '');
+            const multiKeywordLogicType = multiKeywordLogic.value;
 
-            for (const filePath in allLogsContent) {
+            const fromDateStr = fromDateInput.value;
+            const toDateStr = toDateInput.value;
+            const fromTimeStr = fromTimeInput.value;
+            const toTimeStr = toTimeInput.value;
+
+            let fromDateTime = null;
+            let toDateTime = null;
+
+            // Parse date and time inputs carefully
+            if (fromDateStr) {
+                const dateTimeString = `${fromDateStr}T${fromTimeStr || '00:00'}:00`; // Ensure seconds are present for Date parsing
+                fromDateTime = new Date(dateTimeString);
+                if (isNaN(fromDateTime.getTime())) fromDateTime = null; // Invalidate if parsing failed
+            }
+            if (toDateStr) {
+                const dateTimeString = `${toDateStr}T${toTimeStr || '23:59'}:59`; // Ensure seconds are present for Date parsing
+                toDateTime = new Date(dateTimeString);
+                if (isNaN(toDateTime.getTime())) toDateTime = null; // Invalidate if parsing failed
+            }
+            
+            if (fromDateTime && toDateTime && fromDateTime > toDateTime) {
+                showMessageBox('From Date/Time cannot be after To Date/Time.', 'error');
+                return;
+            }
+
+
+            let foundResultsCount = 0;
+            let totalKeywordOccurrences = 0;
+            let searchPattern;
+            let excludePattern;
+            let multiKeywordPatterns = [];
+
+            try {
+                if (query) {
+                    let patternString = query;
+                    if (!useRegex) {
+                        patternString = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    }
+                    if (isStartsWith) patternString = `^${patternString}`;
+                    if (isEndsWith) patternString = `${patternString}$`;
+                    searchPattern = new RegExp(patternString, isCaseSensitive ? 'g' : 'gi');
+                }
+
+                if (excludeKeyword) {
+                    const escapedExclude = excludeKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    excludePattern = new RegExp(escapedExclude, 'i');
+                }
+
+                if (multiKeywords.length > 0) {
+                    multiKeywordPatterns = multiKeywords.map(keyword => {
+                        const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        return new RegExp(escapedKeyword, isCaseSensitive ? 'g' : 'gi');
+                    });
+                }
+
+            } catch (e) {
+                resultsDiv.innerHTML = `<p class="text-center text-red-500">Invalid Regular Expression: ${e.message}</p>`;
+                return;
+            }
+
+            const selectedFileCheckboxes = document.querySelectorAll('.file-select-checkbox:checked');
+            const filesToSearch = Array.from(selectedFileCheckboxes).map(cb => cb.value);
+
+            if (filesToSearch.length === 0) {
+                resultsDiv.innerHTML = '<p class="text-center text-gray-500">No log files selected for search. Please select at least one file.</p>';
+                return;
+            }
+
+            for (const filePath of filesToSearch) {
                 const content = allLogsContent[filePath];
+                if (!content) continue;
+
                 const lines = content.split('\n');
                 let fileResultsHtml = '';
                 let fileHasMatches = false;
 
-                lines.forEach(line => {
-                    if (line.toLowerCase().includes(lowerCaseQuery)) {
-                        // Highlight the search term
-                        const highlightedLine = line.replace(
-                            new RegExp(`(${query})`, 'gi'),
-                            '<span class="highlight">$1</span>'
+                lines.forEach((line, index) => {
+                    let passesFilters = true;
+                    const originalLine = line;
+
+                    // Log Level Filter
+                    if (selectedLogLevel !== 'ALL') {
+                        const logLevelMatch = line.match(/\] (INFO|WARNING|ERROR|DEBUG):/);
+                        if (!logLevelMatch || logLevelMatch[1] !== selectedLogLevel) {
+                            passesFilters = false;
+                        }
+                    }
+
+                    // Date & Time Range Filter
+                    const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+                    if (timestampMatch) {
+                        const logDate = new Date(timestampMatch[1]);
+                        // Check for invalid date objects
+                        if (isNaN(logDate.getTime())) {
+                            passesFilters = false; // Invalid timestamp in log line, skip
+                        } else if ((fromDateTime && logDate < fromDateTime) || (toDateTime && logDate > toDateTime)) {
+                            passesFilters = false;
+                        }
+                    } else if (fromDateTime || toDateTime) {
+                        // If date/time filter is active but line has no valid timestamp, it doesn't pass
+                        passesFilters = false;
+                    }
+
+                    // Exclude Keyword Filter
+                    if (passesFilters && excludeKeyword && excludePattern.test(line)) {
+                        passesFilters = false;
+                    }
+
+                    // Multi-Keyword Search
+                    if (passesFilters && multiKeywords.length > 0) {
+                        let multiKeywordMatch = false;
+                        if (multiKeywordLogicType === 'AND') {
+                            multiKeywordMatch = multiKeywordPatterns.every(pattern => pattern.test(line));
+                        } else {
+                            multiKeywordMatch = multiKeywordPatterns.some(pattern => pattern.test(line));
+                        }
+                        if (!multiKeywordMatch) {
+                            passesFilters = false;
+                        }
+                    }
+
+                    // Primary Text/Regex Search
+                    if (passesFilters && (query === '' || searchPattern.test(line))) {
+                        let lineKeywordOccurrences = 0;
+                        const highlightedLine = query === '' ? line : line.replace(
+                            searchPattern,
+                            (match) => {
+                                lineKeywordOccurrences++;
+                                return `<span class="highlight">${match}</span>`;
+                            }
                         );
-                        fileResultsHtml += `<p>${highlightedLine}</p>`;
+                        totalKeywordOccurrences += lineKeywordOccurrences;
+
+                        fileResultsHtml += `
+                            <p class="flex items-start text-sm">
+                                <span class="line-number">${index + 1}:</span>
+                                <span class="flex-grow">${highlightedLine}</span>
+                                <button class="copy-button" onclick="copyLineToClipboard('${originalLine.replace(/'/g, "\\'")}')">Copy</button>
+                            </p>`;
                         fileHasMatches = true;
-                        foundResults = true;
+                        foundResultsCount++;
                     }
                 });
 
                 if (fileHasMatches) {
-                    const logFileName = filePath.split('/').pop(); // Get just the file name
+                    const logFileName = showFullPath ? filePath : filePath.split('/').pop();
                     resultsDiv.innerHTML += `
-                        <div class="log-entry">
-                            <strong>${logFileName}</strong> (${filePath})
+                        <div class="log-entry ${shouldWrapLines ? '' : 'no-wrap'}">
+                            <div class="flex justify-between items-center mb-2">
+                                <strong>${logFileName}</strong>
+                                <button onclick="downloadRawLogFile('${filePath}')" class="ml-4 bg-blue-200 text-blue-800 text-sm font-semibold py-1 px-3 rounded-md hover:bg-blue-300 transition duration-200 ease-in-out dark:bg-blue-700 dark:text-blue-100 dark:hover:bg-blue-600">
+                                    Download Raw
+                                </button>
+                            </div>
                             ${fileResultsHtml}
                         </div>
                     `;
                 }
             }
 
-            if (!foundResults) {
-                resultsDiv.innerHTML = `<p class="text-center text-gray-500">No results found for "${query}".</p>`;
+            if (!foundResultsCount) {
+                resultsDiv.innerHTML = `<p class="text-center text-gray-500">No results found for "${query}" with current filters.</p>`;
+            } else {
+                resultCountSpan.textContent = foundResultsCount;
+                keywordOccurrencesSpan.textContent = totalKeywordOccurrences;
+                resultCountContainer.classList.remove('hidden');
+                resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            savePersistentSettings();
+        }
+
+        // Populate search history dropdown
+        function populateSearchHistory() {
+            let searchHistorySelect = document.getElementById('searchHistorySelect');
+            if (!searchHistorySelect) {
+                searchHistorySelect = document.createElement('select');
+                searchHistorySelect.id = 'searchHistorySelect';
+                searchHistorySelect.className = 'mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200';
+                searchHistorySelect.onchange = (event) => {
+                    if (event.target.value) {
+                        searchInput.value = event.target.value;
+                        performSearch();
+                    }
+                };
+                const searchInputParent = searchInput.parentNode;
+                // Insert after search input and before clear search button
+                searchInputParent.insertBefore(searchHistorySelect, searchButton);
+            }
+            searchHistorySelect.innerHTML = '<option value="">-- Search History --</option>';
+            searchHistory.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item;
+                option.textContent = item;
+                searchHistorySelect.appendChild(option);
+            });
+        }
+
+        // Save/Load Search History
+        function saveSearchHistory() {
+            localStorage.setItem('logAggregatorSearchHistory', JSON.stringify(searchHistory));
+        }
+
+        function loadSearchHistory() {
+            const storedHistory = localStorage.getItem('logAggregatorSearchHistory');
+            if (storedHistory) {
+                searchHistory = JSON.parse(storedHistory);
+                populateSearchHistory();
             }
         }
 
         // Event Listeners
-        searchButton.addEventListener('click', performSearch);
-        searchInput.addEventListener('keypress', (event) => {
+        loginButton.addEventListener('click', handleLogin);
+        passwordInput.addEventListener('keypress', (event) => {
             if (event.key === 'Enter') {
-                performSearch();
+                handleLogin();
+            }
+        });
+        searchButton.addEventListener('click', performSearch);
+        searchInput.addEventListener('input', debounce(performSearch, DEBOUNCE_DELAY));
+        clearSearchButton.addEventListener('click', clearSearch);
+        downloadResultsButton.addEventListener('click', downloadSearchResults);
+        downloadSelectedRawButton.addEventListener('click', downloadSelectedRawLogsZip);
+        clearAllFiltersButton.addEventListener('click', clearAllFilters);
+        savePresetButton.addEventListener('click', saveSearchPreset);
+        loadPresetButton.addEventListener('click', loadSearchPreset);
+        managePresetsButton.addEventListener('click', managePresets);
+        exportPresetsButton.addEventListener('click', exportPresets);
+        importPresetsButton.addEventListener('click', importPresets);
+        clearLocalStorageButton.addEventListener('click', clearAllLocalStorage);
+        aboutButton.addEventListener('click', () => aboutModal.style.display = 'flex');
+        closeAboutModal.addEventListener('click', () => aboutModal.style.display = 'none');
+        window.addEventListener('click', (event) => {
+            if (event.target == aboutModal) {
+                aboutModal.style.display = 'none';
+            }
+        });
+        themeToggleButton.addEventListener('click', toggleTheme);
+        appendLogButton.addEventListener('click', appendNewLog);
+        createNewLogFileButton.addEventListener('click', createNewLogFile);
+        lineWrapToggle.addEventListener('change', () => {
+            applyLineWrapSetting();
+            savePersistentSettings();
+        });
+        selectAllFilesButton.addEventListener('click', () => {
+            document.querySelectorAll('.file-select-checkbox').forEach(cb => cb.checked = true);
+            savePersistentSettings();
+        });
+        deselectAllFilesButton.addEventListener('click', () => {
+            document.querySelectorAll('.file-select-checkbox').forEach(cb => cb.checked = false);
+            savePersistentSettings();
+        });
+
+        // Event listeners for filter changes to save settings and update clear buttons
+        caseSensitiveToggle.addEventListener('change', savePersistentSettings);
+        regexSearchToggle.addEventListener('change', savePersistentSettings);
+        fullPathToggle.addEventListener('change', savePersistentSettings);
+        startsWithToggle.addEventListener('change', savePersistentSettings);
+        endsWithToggle.addEventListener('change', savePersistentSettings);
+        logLevelFilter.addEventListener('change', savePersistentSettings);
+        excludeKeywordInput.addEventListener('input', updateClearButtonVisibility);
+        excludeKeywordInput.addEventListener('change', savePersistentSettings);
+        clearExcludeKeywordButton.addEventListener('click', () => {
+            excludeKeywordInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+        multiKeywordInput.addEventListener('input', updateClearButtonVisibility);
+        multiKeywordInput.addEventListener('change', savePersistentSettings);
+        multiKeywordLogic.addEventListener('change', savePersistentSettings);
+        clearMultiKeywordButton.addEventListener('click', () => {
+            multiKeywordInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+        fromDateInput.addEventListener('change', savePersistentSettings);
+        clearFromDateButton.addEventListener('click', () => {
+            fromDateInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+        toDateInput.addEventListener('change', savePersistentSettings);
+        clearToDateButton.addEventListener('click', () => {
+            toDateInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+        fromTimeInput.addEventListener('change', savePersistentSettings);
+        clearFromTimeButton.addEventListener('click', () => {
+            fromTimeInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+        toTimeInput.addEventListener('change', savePersistentSettings);
+        clearToTimeButton.addEventListener('click', () => {
+            toTimeInput.value = '';
+            updateClearButtonVisibility();
+            savePersistentSettings();
+        });
+
+        fileSelectionContainer.addEventListener('change', (event) => {
+            if (event.target.classList.contains('file-select-checkbox')) {
+                savePersistentSettings();
             }
         });
 
-        // Load logs when the page loads
-        window.onload = loadAllLogs;
+        // Clickable log levels and timestamps
+        resultsDiv.addEventListener('click', (event) => {
+            const target = event.target;
+
+            // Clickable Log Levels
+            // Check if the clicked element is a span containing a log level
+            if (target.tagName === 'SPAN' && target.textContent.match(/^(INFO|WARNING|ERROR|DEBUG)$/)) {
+                logLevelFilter.value = target.textContent;
+                savePersistentSettings();
+                performSearch();
+                showMessageBox(`Filtered by log level: ${target.textContent}`, 'info');
+                return; // Prevent further processing if a log level was clicked
+            }
+
+            // Clickable Timestamps
+            // Check if the clicked element's text matches a timestamp format
+            const timestampMatch = target.textContent.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$/);
+            if (timestampMatch) {
+                const datePart = timestampMatch[1].split(' ')[0];
+                const timePart = timestampMatch[1].split(' ')[1].substring(0, 5); // HH:MM
+                fromDateInput.value = datePart;
+                toDateInput.value = datePart;
+                fromTimeInput.value = timePart;
+                toTimeInput.value = timePart;
+                updateClearButtonVisibility();
+                savePersistentSettings();
+                performSearch();
+                showMessageBox(`Filtered by date: ${datePart} and time: ${timePart}`, 'info');
+                return; // Prevent further processing if a timestamp was clicked
+            }
+        });
+
+
+        // Scroll to top/bottom functionality
+        window.addEventListener('scroll', () => {
+            if (window.pageYOffset > 200) {
+                scrollToTopBtn.classList.remove('hidden');
+            } else {
+                scrollToTopBtn.classList.add('hidden');
+            }
+            if ((window.innerHeight + window.pageYOffset) < document.body.offsetHeight - 200) {
+                scrollToBottomBtn.classList.remove('hidden');
+            } else {
+                scrollToBottomBtn.classList.add('hidden');
+            }
+        });
+
+        scrollToTopBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        scrollToBottomBtn.addEventListener('click', () => {
+            window.scrollTo({ top: document.body.offsetHeight, behavior: 'smooth' });
+        });
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', (event) => {
+            const isInputFocused = document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT';
+
+            if (event.key === 'Escape' && aboutModal.style.display === 'flex') {
+                closeAboutModal.click();
+            } else if (event.key === 'Enter' && !isInputFocused && logSearchSection.classList.contains('hidden')) {
+                loginButton.click();
+            } else if (event.key === 'Enter' && !isInputFocused && !aboutModal.style.display === 'flex' && !loginSection.classList.contains('hidden')) {
+                searchButton.click();
+            } else if (event.ctrlKey && event.key === 's' && !isInputFocused) {
+                event.preventDefault();
+                savePresetButton.click();
+            } else if (event.ctrlKey && event.key === 'l' && !isInputFocused) {
+                event.preventDefault();
+                loadPresetButton.click();
+            } else if (event.ctrlKey && event.key === 'c' && !isInputFocused) {
+                 event.preventDefault();
+                 clearSearchButton.click();
+            } else if (event.ctrlKey && event.key === 'a' && !isInputFocused) {
+                event.preventDefault();
+                selectAllFilesButton.click();
+            } else if (event.ctrlKey && event.key === 'd' && !isInputFocused) {
+                event.preventDefault();
+                deselectAllFilesButton.click();
+            }
+        });
+
+        // Drag and Drop for local files
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropArea = document.body;
+            dropArea.addEventListener('dragover', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropArea.classList.add('border-blue-500', 'border-dashed');
+            });
+
+            dropArea.addEventListener('dragleave', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropArea.classList.remove('border-blue-500', 'border-dashed');
+            });
+
+            dropArea.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropArea.classList.remove('border-blue-500', 'border-dashed');
+                const files = event.dataTransfer.files;
+                handleLocalFiles(files);
+            });
+
+            localFileInput.addEventListener('change', (event) => {
+                handleLocalFiles(event.target.files);
+            });
+        });
+
+
+        // Expose functions to global scope for onclick attributes
+        window.downloadRawLogFile = downloadRawLogFile;
+        window.copyLineToClipboard = copyLineToClipboard;
+        window.renamePreset = renamePreset;
+        window.deletePreset = deletePreset;
+
+        // Initial load of persistent settings (theme, etc.) when page loads
+        window.onload = () => {
+            loadPersistentSettings();
+        };
     </script>
 </body>
 </html>
